@@ -183,44 +183,43 @@ func (a *RecordedApp) CreateOrUpdate(labels map[string]string, isDiffRun bool) e
 }
 
 func (a *RecordedApp) createOrUpdate(c *corev1.ConfigMap, labels map[string]string, isDiffRun bool) error {
+	err := a.mergeAppUpdates(c, labels)
+	if err != nil {
+		return err
+	}
+
 	var dryRunValue []string = nil
 
-	configMap, err := a.coreClient.CoreV1().ConfigMaps(a.nsName).Get(context.TODO(), a.name, metav1.GetOptions{})
+	if isDiffRun {
+		dryRunValue = []string{metav1.DryRunAll}
+	}
 
+	configmap, err := a.coreClient.CoreV1().ConfigMaps(a.nsName).Create(context.TODO(), c, metav1.CreateOptions{DryRun: dryRunValue})
 	if err != nil {
-		if errors.IsNotFound(err) {
-			if isDiffRun {
-				dryRunValue = []string{metav1.DryRunAll}
+		if errors.IsAlreadyExists(err) {
+			existingConfigMap, err := a.coreClient.CoreV1().ConfigMaps(a.nsName).Get(context.TODO(), c.GetObjectMeta().GetName(), metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("Getting app: %s", err)
 			}
 
-			err := a.mergeAppUpdates(c, labels)
+			err = a.mergeAppUpdates(existingConfigMap, labels)
 			if err != nil {
 				return err
 			}
 
-			configMap, err = a.coreClient.CoreV1().ConfigMaps(a.nsName).Create(context.TODO(), c, metav1.CreateOptions{DryRun: dryRunValue})
+			_, err = a.coreClient.CoreV1().ConfigMaps(a.nsName).Update(context.TODO(), existingConfigMap, metav1.UpdateOptions{})
 			if err != nil {
-				return fmt.Errorf("Creating app: %s", err)
+				return fmt.Errorf("Updating app: %s", err)
 			}
-		} else {
-			return fmt.Errorf("Getting app: %s", err)
+
+			return nil
 		}
-	} else {
-		err = a.mergeAppUpdates(configMap, labels)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("Creating app: %s", err)
 	}
 
-	// restricting to update the configmap returned through dry run
-	if dryRunValue == nil {
-		configMap, err = a.coreClient.CoreV1().ConfigMaps(a.nsName).Update(context.TODO(), configMap, metav1.UpdateOptions{})
-		if err != nil {
-			return fmt.Errorf("Updating app: %s", err)
-		}
+	if isDiffRun {
+		a.setMeta(*configmap)
 	}
-
-	a.setMeta(*configMap)
 
 	return nil
 }
