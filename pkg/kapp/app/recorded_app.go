@@ -177,6 +177,8 @@ func (a *RecordedApp) CreateOrUpdate(labels map[string]string, isDiffRun bool) e
 		}
 
 		configMap.ObjectMeta.Name = a.fqName
+		// setting migration as true as we will be creating configmap with suffix
+		a.isMigrated = true
 	}
 
 	return a.createOrUpdate(configMap, labels, isDiffRun)
@@ -417,6 +419,11 @@ func (a *RecordedApp) setMeta(app corev1.ConfigMap) (Meta, error) {
 }
 
 func (a *RecordedApp) meta() (Meta, error) {
+	if a.memoizedMeta != nil {
+		// set if bulk read on initialization
+		return *a.memoizedMeta, nil
+	}
+
 	if a.isMigrationEnabled() {
 		app, err := a.coreClient.CoreV1().ConfigMaps(a.nsName).Get(context.TODO(), a.fqName, metav1.GetOptions{})
 		if err == nil {
@@ -426,11 +433,6 @@ func (a *RecordedApp) meta() (Meta, error) {
 			// return if error is anything other than configmap not found
 			return Meta{}, fmt.Errorf("Getting app: %s", err)
 		}
-	}
-
-	if a.memoizedMeta != nil {
-		// set if bulk read on initialization
-		return *a.memoizedMeta, nil
 	}
 
 	app, err := a.coreClient.CoreV1().ConfigMaps(a.nsName).Get(context.TODO(), a.name, metav1.GetOptions{})
